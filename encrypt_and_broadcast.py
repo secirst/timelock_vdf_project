@@ -5,14 +5,15 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad
 
-# VDF计算函数，使用重复平方模N
+# VDF计算函数，重复平方模N
 def vdf_eval(x, T, N):
     result = x
     for _ in range(T):
         result = pow(result, 2, N)
     return result
 
-# 从文件加载大素数模数N，文件内容应是16进制字符串（无0x前缀）
+# 加载RSA模数N
+
 def load_modulus(filename="vdf_modulus.txt"):
     with open(filename, "r") as f:
         hex_str = f.read().strip()
@@ -33,7 +34,7 @@ def time_lock_encrypt(message, delay_seconds, T):
     cipher = AES.new(derived_key, AES.MODE_CBC)
     ct_bytes = cipher.encrypt(pad(message.encode(), AES.block_size))
 
-    timestamp = int(time.time())  # 当前UTC时间戳，单位秒
+    timestamp = int(time.time())  # 当前发送时间
 
     broadcast_package = {
         "ciphertext": ct_bytes.hex(),
@@ -42,14 +43,14 @@ def time_lock_encrypt(message, delay_seconds, T):
         "N": str(N),
         "T": T,
         "delay_seconds": delay_seconds,
-        "timestamp": timestamp,  # 新增字段，发布时间
+        "timestamp": timestamp,
+        "aes_key_hint": aes_key.hex()  # 加入用于推算VDF的x
     }
 
     with open("broadcast_package.json", "w") as f:
         json.dump(broadcast_package, f)
     print(f"[+] Broadcast package saved as broadcast_package.json")
     return broadcast_package
-
 
 if __name__ == "__main__":
     print("===== Timelock Broadcast Encryption System =====")
