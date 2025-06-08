@@ -5,14 +5,11 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad
 
-# VDF计算函数，重复平方模N
 def vdf_eval(x, T, N):
     result = x
     for _ in range(T):
         result = pow(result, 2, N)
     return result
-
-# 加载RSA模数N
 
 def load_modulus(filename="vdf_modulus.txt"):
     with open(filename, "r") as f:
@@ -21,30 +18,24 @@ def load_modulus(filename="vdf_modulus.txt"):
     print("[*] Loaded modulus N from file.")
     return N
 
-def time_lock_encrypt(message, delay_seconds, T):
+def time_lock_encrypt(message, T):
     N = load_modulus()
     aes_key = get_random_bytes(16)
-
     x = int.from_bytes(aes_key, 'big')
-    vdf_x = vdf_eval(x, T, N)
+    y = vdf_eval(x, T, N)
 
-    vdf_x_bytes = vdf_x.to_bytes((vdf_x.bit_length() + 7) // 8, byteorder='big')
-    derived_key = hashlib.sha256(vdf_x_bytes).digest()[:16]
+    x_bytes = aes_key
+    derived_key = hashlib.sha256(x_bytes).digest()[:16]
 
     cipher = AES.new(derived_key, AES.MODE_CBC)
     ct_bytes = cipher.encrypt(pad(message.encode(), AES.block_size))
 
-    timestamp = int(time.time())  # 当前发送时间
-
     broadcast_package = {
         "ciphertext": ct_bytes.hex(),
         "iv": cipher.iv.hex(),
-        "vdf_x": str(vdf_x),
+        "vdf_y": str(y),
         "N": str(N),
         "T": T,
-        "delay_seconds": delay_seconds,
-        "timestamp": timestamp,
-        "aes_key_hint": aes_key.hex()  # 加入用于推算VDF的x
     }
 
     with open("broadcast_package.json", "w") as f:
@@ -55,6 +46,5 @@ def time_lock_encrypt(message, delay_seconds, T):
 if __name__ == "__main__":
     print("===== Timelock Broadcast Encryption System =====")
     msg = input("Enter the message to encrypt and broadcast later: ")
-    delay = int(input("Enter delay time in seconds (trusted delay before decryption): "))
-    T = int(input("Enter VDF parameter T (e.g., 1000): "))
-    time_lock_encrypt(msg, delay, T)
+    T = int(input("Enter VDF parameter T (e.g., 20): "))
+    time_lock_encrypt(msg, T)

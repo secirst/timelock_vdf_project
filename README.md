@@ -1,5 +1,5 @@
 Timelock Broadcast Encryption System
-A Python-based time-lock encryption system that allows broadcasting encrypted messages which can only be decrypted after a preset time delay, based on Verifiable Delay Function (VDF).
+A Python-based time-lock encryption system that allows broadcasting encrypted messages which can only be decrypted after a preset computational delay, enforced using a Verifiable Delay Function (VDF).
 
 Table of Contents
 Project Overview
@@ -13,17 +13,16 @@ Testing
 Troubleshooting
 Future Improvements
 License
-Acknowledgements
 
 Project Overview
-This project implements a timelock broadcast encryption system in Python, leveraging a Verifiable Delay Function (VDF) to encapsulate AES encryption keys. It ensures that messages can only be decrypted after a specified delay, regardless of when the decryption process starts.
+This project implements a time-lock broadcast encryption system in Python. It uses a **Verifiable Delay Function (VDF)** to delay access to a symmetric AES key. The encryption ensures that **receivers cannot decrypt the message until after performing a computational delay**, regardless of their system clock or intent.
 
 Features
-Time-lock encryption based on VDF and AES-CBC encryption.
-Broadcast package generation with embedded delay parameters.
-Secure decryption only possible after the time delay.
-Command-line interactive input for message and delay configuration.
-Modular code structure for easy maintenance and extension.
+Time-lock encryption based on VDF + AES-CBC.
+Enforced delay through repeated squaring (no trusted time server required).
+Self-contained broadcast package with all decryption materials.
+Command-line interface for message input and delay configuration.
+Modular code structure for easy testing and enhancement.
 
 Prerequisites
 Python 3.7+
@@ -41,26 +40,33 @@ Encrypt and Broadcast
 Run the encryption script:
 python encrypt_and_broadcast.py
 You will be prompted to:
-Enter the message to encrypt and broadcast.
-Enter the delay time in seconds (e.g., 600 for 10 minutes).
-Enter the VDF parameter T controlling the time-lock difficulty.
-This creates a broadcast_package.json file.
+Enter the plaintext message to encrypt.
+Enter the VDF difficulty parameter T (e.g., 20 for moderate delay).
+A broadcast_package.json file will be generated.
 
 Receive and Decrypt
 Run the decryption script:
 python receive_and_decrypt.py
-The script reads broadcast_package.json, waits the specified delay, then performs the VDF calculation to unlock the AES key and decrypt the message.
+This script:
+Loads the broadcast package.
+Performs T rounds of modular square root computation to recover the AES key.
+Decrypts the message using AES.
 
 How It Works
-The plaintext message is encrypted using AES-CBC with a random AES key.
-The AES key is then time-locked via repeated squaring in a large RSA modulus (N), acting as a Verifiable Delay Function.
-The broadcast package stores the ciphertext, IV, encrypted key representation (vdf_x), modulus N, and delay parameters.
-The receiver waits for the delay time and recomputes the VDF to retrieve the AES key, then decrypts the message.
+A random AES key is generated to encrypt the message using AES-CBC.
+This AES key is then encoded as an integer x, and time-locked using the VDF:
+y = x^(2^T) mod N
+The broadcast package includes:
+ciphertext, iv — for AES decryption
+y, N, and T — to reconstruct x
+Receivers perform T modular square root operations in reverse to recover x, derive the AES key as:
+key = sha256(x_bytes)[:16]
+
 
 Configuration
-The RSA modulus N is stored in vdf_modulus.txt. You can replace it with a securely generated large prime or RSA modulus.
-VDF parameter T controls delay complexity — larger values increase security but also computation time.
-AES uses 128-bit key in CBC mode.
+The RSA modulus N is stored in vdf_modulus.txt. You can replace it with any large prime or safe RSA modulus.
+Parameter T controls the delay difficulty — higher T = longer decryption time.
+AES encryption uses 128-bit CBC mode with PKCS7 padding.
 
 Testing
 You can run the correctness test:
@@ -73,11 +79,11 @@ Module import errors: Check sys.path or run scripts from the project root direct
 Delay not respected: The delay is counted from broadcast generation time; ensure system clocks are synchronized if on different machines.
 
 Future Improvements
-Use AES-GCM or authenticated encryption modes.
-Add network broadcast and receiver modules.
-Implement key integrity checks and digital signatures.
-Support batch messages and more flexible scheduling.
-Optimize VDF computation using dedicated libraries or hardware acceleration.
+Use AES-GCM (authenticated encryption)
+Add digital signatures for authenticity
+Allow time-locked file encryption
+Optimize VDF using hardware acceleration or GPU
+Use RSA composite modulus and avoid modular square root for strong delay enforcement
 
 License
 MIT License — see the LICENSE file for details.

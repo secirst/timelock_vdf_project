@@ -1,78 +1,93 @@
 import json
 import time
 import hashlib
-import threading
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
-# VDF 计算
+def legendre_symbol(a, p):
+    return pow(a, (p - 1) // 2, p)
 
-def vdf_eval(x, T, N):
-    result = x
-    for _ in range(T):
-        result = pow(result, 2, N)
-    return result
+def tonelli_shanks(a, p):
+    if legendre_symbol(a, p) != 1:
+        return None
+    if a == 0:
+        return 0
+    if p % 4 == 3:
+        return pow(a, (p + 1) // 4, p)
+    q = p - 1
+    s = 0
+    while q % 2 == 0:
+        q //= 2
+        s += 1
+    z = 2
+    while legendre_symbol(z, p) != p - 1:
+        z += 1
+    m = s
+    c = pow(z, q, p)
+    t = pow(a, q, p)
+    r = pow(a, (q + 1) // 2, p)
+    while t != 1:
+        i = 1
+        t2i = pow(t, 2, p)
+        while t2i != 1 and i < m:
+            t2i = pow(t2i, 2, p)
+            i += 1
+        if i == m:
+            return None
+        b = pow(c, 2 ** (m - i - 1), p)
+        m = i
+        c = pow(b, 2, p)
+        t = (t * c) % p
+        r = (r * b) % p
+    return r
 
-class VDFWorker(threading.Thread):
-    def __init__(self, x, T, N):
-        super().__init__()
-        self.x = x
-        self.T = T
-        self.N = N
-        self.result = None
+def mod_sqrt(a, p):
+    root = tonelli_shanks(a, p)
+    if root is None:
+        return None, None
+    return root, p - root
 
-    def run(self):
-        print("[*] VDF computation started in background...")
-        self.result = vdf_eval(self.x, self.T, self.N)
-        print("[*] VDF computation completed.")
+def vdf_invert(y, T, N):
+    x_candidates = [y]
+    for i in range(T):
+        next_candidates = []
+        for val in x_candidates:
+            r1, r2 = mod_sqrt(val, N)
+            if r1 is None:
+                continue
+            next_candidates.extend([r1, r2])
+        x_candidates = next_candidates
+    return x_candidates  # 可能有多个根
 
 def time_lock_decrypt(broadcast_package):
-    delay = broadcast_package["delay_seconds"]
     T = broadcast_package["T"]
     N = int(broadcast_package["N"])
+    y = int(broadcast_package["vdf_y"])
     timestamp = broadcast_package.get("timestamp", 0)
-    vdf_x_expected = int(broadcast_package["vdf_x"])
 
-    # VDF初始x
-    x = int.from_bytes(bytes.fromhex(broadcast_package["aes_key_hint"]), byteorder='big')
-
-    # 开始计算VDF
-    vdf_thread = VDFWorker(x, T, N)
-    vdf_thread.start()
-
-    # 等待到运行时间达到 timestamp + delay
-    now = int(time.time())
-    target_time = timestamp + delay
-    wait_time = max(0, target_time - now)
-
-    if wait_time > 0:
-        print(f"[+] Waiting {wait_time} seconds until unlock time...")
-        time.sleep(wait_time)
-    else:
-        print("[+] Unlock time already passed, just wait for VDF to finish.")
-
-    print("[+] Waiting for VDF thread to complete...")
-    vdf_thread.join()
-    vdf_x = vdf_thread.result
-
-    if vdf_x != vdf_x_expected:
-        raise ValueError("[!] VDF output mismatch. Decryption aborted.")
-
-    vdf_x_bytes = vdf_x.to_bytes((vdf_x.bit_length() + 7) // 8, byteorder='big')
-    aes_key = hashlib.sha256(vdf_x_bytes).digest()[:16]
+    print("[*] Starting VDF inverse computation (this may take time)...")
+    roots = vdf_invert(y, T, N)
+    if not roots:
+        raise ValueError("[!] Failed to compute modular square roots.")
 
     ciphertext = bytes.fromhex(broadcast_package["ciphertext"])
     iv = bytes.fromhex(broadcast_package["iv"])
 
-    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
-    plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size).decode()
+    for idx, x in enumerate(roots):
+        x_bytes = x.to_bytes((x.bit_length() + 7) // 8, 'big')
+        aes_key = hashlib.sha256(x_bytes).digest()[:16]
+        cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+        try:
+            plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size).decode()
+            print(f"[+] Decryption succeeded with root #{idx + 1}")
+            return plaintext
+        except:
+            continue
 
-    return plaintext
+    raise ValueError("[!] All candidate roots failed. Decryption aborted.")
 
 if __name__ == "__main__":
-    filename = "broadcast_package.json"
-    with open(filename, "r") as f:
+    with open("broadcast_package.json", "r") as f:
         package = json.load(f)
-
     secret = time_lock_decrypt(package)
     print(f"[Decryption Result] Plaintext message: {secret}")
